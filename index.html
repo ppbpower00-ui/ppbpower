@@ -402,7 +402,7 @@ fieldset.lockable{border:0;padding:0;margin:0;min-width:0;display:flex;flex-dire
     <div class="legend" id="tripSum"></div>
     <div class="tlegend" id="tripLegend"></div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>Vehicle</th><th>Trips</th><th>Avg trip time</th><th>Running</th><th>Plant queue</th><th>Unloading</th><th>Loading</th><th data-tpl="Stops {5}+ min">Stops 5+ min</th><th data-tpl="Stops {30}+ (action)">Stops 30+ (action)</th><th>Offline</th><th style="min-width:220px">Timeline</th></tr></thead>
+      <thead><tr><th>Vehicle</th><th>Trips</th><th>Avg trip time</th><th>Distance</th><th>Running</th><th>Plant queue</th><th>Unloading</th><th>Loading</th><th data-tpl="Stops {5}+ min">Stops 5+ min</th><th data-tpl="Stops {30}+ (action)">Stops 30+ (action)</th><th>Offline</th><th style="min-width:220px">Timeline</th></tr></thead>
       <tbody id="tripBody"><tr><td colspan="11" class="empty">Loading…</td></tr></tbody>
     </table></div>
     <div class="foot" id="tripNote"></div>
@@ -636,12 +636,12 @@ fieldset.lockable{border:0;padding:0;margin:0;min-width:0;display:flex;flex-dire
       <div class="tlegend" id="tlLegend"></div>
       <h3 style="margin:4px 0 0;font-family:var(--display);font-size:18px">Trips</h3>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>#</th><th>Left GTK</th><th>Reached loading</th><th>Back at GTK</th><th>Trip time</th><th>Running</th><th>Loading</th><th>Plant queue</th><th data-tpl="Stops {5}+">Stops 5+</th><th data-tpl="Stops {30}+">Stops 30+</th><th>Offline</th><th>Unloading (on return)</th></tr></thead>
+        <thead><tr><th>#</th><th>Left GTK</th><th>Reached loading</th><th>Back at GTK</th><th>Trip time</th><th>Distance</th><th>Running</th><th>Loading</th><th>Plant queue</th><th data-tpl="Stops {5}+">Stops 5+</th><th data-tpl="Stops {30}+">Stops 30+</th><th>Offline</th><th>Unloading (on return)</th></tr></thead>
         <tbody id="tlTrips"></tbody>
       </table></div>
       <h3 style="margin:4px 0 0;font-family:var(--display);font-size:18px">Full timeline</h3>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>Start</th><th>End</th><th>Duration</th><th>Activity</th><th>Location</th><th></th></tr></thead>
+        <thead><tr><th>Start</th><th>End</th><th>Duration</th><th>Distance</th><th>Activity</th><th>Location</th><th></th></tr></thead>
         <tbody id="tlBody"></tbody>
       </table></div>
     </div>
@@ -1245,21 +1245,22 @@ const SEG_NAME={run:'Moving',stop:'Stopped on route',queue:'Plant queue',unload:
 let STOP5=5*60, STOP30=30*60, TRIP_H=6, HOT_H=2;
 const M5=()=>Math.round(STOP5/60), M30=()=>Math.round(STOP30/60);
 // raw: [[state,startEpoch,endEpoch,place],...]
+const kmAdd=(a,b)=>a==null&&b==null?null:(a||0)+(b||0);
 function smoothSegs(raw){
-  const a=(raw||[]).map(r=>({st:r[0],s:+r[1],e:+r[2],place:r[3]||'',lat:r[4]!=null?+r[4]:null,lng:r[5]!=null?+r[5]:null})).filter(x=>x.e>=x.s).sort((x,y)=>x.s-y.s);
+  const a=(raw||[]).map(r=>({st:r[0],s:+r[1],e:+r[2],place:r[3]||'',lat:r[4]!=null?+r[4]:null,lng:r[5]!=null?+r[5]:null,km:r[6]!=null?+r[6]:null})).filter(x=>x.e>=x.s).sort((x,y)=>x.s-y.s);
   // merge blips under 4 min between two identical states (GPS jitter at the gate)
   let changed=true;
   while(changed){changed=false;
     for(let i=1;i<a.length-1;i++){const p=a[i-1],c=a[i],n=a[i+1];
-      if(c.e-c.s<240&&p.st===n.st&&p.st!==c.st&&(p.st!=='stop'||p.place===n.place)&&n.s-p.e<=900){p.e=n.e;a.splice(i,2);changed=true;break;}}
+      if(c.e-c.s<240&&p.st===n.st&&p.st!==c.st&&(p.st!=='stop'||p.place===n.place)&&n.s-p.e<=900){p.e=n.e;p.km=kmAdd(kmAdd(p.km,c.km),n.km);a.splice(i,2);changed=true;break;}}
   }
   const out=[];
   for(const x of a){const l=out[out.length-1];
-    if(l&&l.st===x.st&&(x.st==='run'||l.place===x.place)&&x.s-l.e<=600)l.e=Math.max(l.e,x.e);else out.push({...x});}
+    if(l&&l.st===x.st&&(x.st==='run'||l.place===x.place)&&x.s-l.e<=600){l.e=Math.max(l.e,x.e);l.km=kmAdd(l.km,x.km);}else out.push({...x});}
   return out;
 }
 function stopClass(g){if(g.st!=='stop')return '';const d=g.e-g.s;return d>=STOP30?'s30':d>=STOP5?'s5':'short';}
-function emptyTot(){return {run:0,queue:0,unload:0,load:0,offline:0,bd:0,stop5:0,stop5n:0,stop30:0,stop30n:0};}
+function emptyTot(){return {km:0,kmKnown:false,run:0,queue:0,unload:0,load:0,offline:0,bd:0,stop5:0,stop5n:0,stop30:0,stop30n:0};}
 // Breakdown ke time wale stop/offline hisse 'bd' ban jaate hain (route stop mein nahi gine jaate)
 function markBreakdowns(segs,wins){
   if(!wins||!wins.length)return segs;
@@ -1274,12 +1275,14 @@ function markBreakdowns(segs,wins){
         nx.push({...p,st:'bd',s:Math.max(a,p.s),e:Math.min(b,p.e)});
         if(b<p.e)nx.push({...p,s:b});
       }pieces=nx;}
+    if(pieces.length>1&&g.km!=null){const span=Math.max(1,g.e-g.s);pieces.forEach(p=>p.km=g.km*(p.e-p.s)/span);}
     out.push(...pieces);
   }
   return out;
 }
 function bdWindows(reg){const now=Date.now()/1000;return bds.filter(b=>b.reg===reg).map(b=>[Date.parse(b.started_at)/1000,b.resolved_at?Date.parse(b.resolved_at)/1000:now]);}
-function addSeg(T,g,dur){
+function addSeg(T,g,dur,fullKm){
+  if(g.km!=null){T.km+=fullKm||g.e<=g.s?g.km:g.km*Math.min(1,dur/(g.e-g.s));T.kmKnown=true;}
   switch(g.st){
     case 'run':T.run+=dur;break;
     case 'queue':T.queue+=dur;break;
@@ -1314,7 +1317,7 @@ function analyzeVehicle(raw,from,to,lastPoll,bdWins){
       const exited=i<segs.length-1||g.e<lastPoll-300;
       if(exited){if(pending)pending.exitAfter=g.e;exitT=g.e;phase='out';loadAt=null;loadPlace='';cur=emptyTot();pending=null;}
     }else{
-      addSeg(cur,g,dur);
+      addSeg(cur,g,dur,true);
       if(g.st==='load'&&loadAt==null){loadAt=g.s;loadPlace=g.place;}
     }
   });
@@ -1337,10 +1340,23 @@ function tripWindow(){
   if(tripRange==='d7')return {from:(now-7*86400000)/1000,to:now/1000};
   return {from:(now-86400000)/1000,to:now/1000};
 }
+let kmData={}, odoFactor=null;
+// GPS km har gaadi ka (exact samay ke andar). Tata odometer aata ho to uski unit (km ya meter) khud pehchaanta hai.
+async function loadKm(w){
+  try{const rows=await api('rpc/fleet_km',{method:'POST',body:JSON.stringify({p_from:new Date(w.from*1000).toISOString(),p_to:new Date(w.to*1000).toISOString()})})||[];
+    kmData={};rows.forEach(r=>{const od=r.odo_from!=null&&r.odo_to!=null?r.odo_to-r.odo_from:null;kmData[r.reg]={gps:+r.km_gps,odoRaw:od};});
+    let g=0,o=0;Object.values(kmData).forEach(k=>{if(k.odoRaw!=null&&k.gps>=5&&k.odoRaw>0){g+=k.gps;o+=k.odoRaw;}});
+    const ratio=g?o/g:null;odoFactor=ratio==null?null:ratio>0.6&&ratio<2?1:ratio>600&&ratio<2000?1/1000:null;}
+  catch(e){kmData={};odoFactor=null;}
+}
+function odoKm(reg){const k=kmData[reg];return k&&k.odoRaw!=null&&odoFactor?k.odoRaw*odoFactor:null;}
+function vehKm(r){const k=kmData[r.reg];return k?k.gps:(r.total.kmKnown?r.total.km:null);}
+const fmtKm=k=>k==null?'—':(k<10?k.toFixed(1):Math.round(k).toLocaleString('en-IN'))+' km';
 async function loadSegs(){
   const w=tripWindow();
   try{const rows=await api('rpc/fleet_segments',{method:'POST',body:JSON.stringify({p_from:new Date(w.from*1000).toISOString(),p_to:new Date(w.to*1000).toISOString()})})||[];
-    segData={};rows.forEach(r=>segData[r.vreg]=r.segs||[]);segErr='';}
+    segData={};rows.forEach(r=>segData[r.vreg]=r.segs||[]);segErr='';
+    await loadKm(w);}
   catch(e){segData={};segErr=/fleet_segments|function|schema cache|404/i.test(e.message)?'Run trip-update.sql once in the Supabase SQL Editor to enable trips and timeline.':'Timeline not loaded: '+e.message;}
 }
 function ganttHtml(segs,from,to,big){
@@ -1349,6 +1365,7 @@ function ganttHtml(segs,from,to,big){
     const k=segKey(g);return `<i style="left:${((s-from)/span*100).toFixed(3)}%;width:${Math.max(.15,(e-s)/span*100).toFixed(3)}%;background:var(${SEG_COL[k]})" title="${esc(SEG_LBL[k])} · ${hm(g.e-g.s)} · ${esc(g.place||'')} · ${when(new Date(g.s*1000).toISOString())}"></i>`;}).join('');
 }
 function legendHtml(){return Object.keys(SEG_LBL).map(k=>`<span><i style="background:var(${SEG_COL[k]})"></i>${SEG_LBL[k]}</span>`).join('');}
+function fleetKm(){return tripRes.reduce((a,r)=>a+(vehKm(r)||0),0);}
 function renderTrips(){
   const w=tripWindow(),lastPoll=cfg?.last_ok_at?Date.parse(cfg.last_ok_at)/1000:w.to;
   const q=$('tripSearch').value.trim().toLowerCase();
@@ -1362,6 +1379,7 @@ function renderTrips(){
   $('tripSum').innerHTML=[
     ['--c-unload','Completed trips (GTK → loading → GTK)',T.trips,T.onTrip?T.onTrip+' vehicle(s) loaded and returning':''],
     ['--c-load','Avg trip time',T.kn?hm(T.sum/T.kn):'—',T.kn?'From '+T.kn+' trips':'No complete trip time yet'],
+    ['--c-move','Distance (GPS)',fmtKm(fleetKm()),fleetKm()?`${tripRes.filter(r=>(vehKm(r)||0)>=1).length} vehicle(s) moved`+(T.trips?` · ${Math.round(fleetKm()/T.trips)} km per trip`:''):'Builds up from now'],
     ['--c-off','Back at GTK without loading',T.nl,T.nl?'Not counted as trips':''],
     ['--c-halt',`Trips over ${TRIP_H} hrs`,longAll,runLongN?`⚠ ${runLongN} vehicle(s) on a trip running over ${TRIP_H} hrs`:''],
     ['--c-s5','Route stop '+M5()+'+ min',T.s5,'Highlight'],
@@ -1369,15 +1387,16 @@ function renderTrips(){
   ].map(([c,t,n,sub])=>`<div class="lg" style="--c:var(${c})"><span class="t">${t}</span><span class="n">${n}</span>${sub?`<span class="s">${sub}</span>`:''}</div>`).join('');
   let rows=tripRes.filter(r=>!q||r.reg.toLowerCase().includes(q));
   rows.sort((a,b)=>(!!b.runLong-!!a.runLong)||b.total.stop30n-a.total.stop30n||b.longN-a.longN||b.count-a.count||a.reg.localeCompare(b.reg));
-  $('tripBody').innerHTML=segErr?`<tr><td colspan="11" class="empty">${esc(segErr)}</td></tr>`:rows.length?rows.map(r=>{const t=r.total;
+  $('tripBody').innerHTML=segErr?`<tr><td colspan="12" class="empty">${esc(segErr)}</td></tr>`:rows.length?rows.map(r=>{const t=r.total;
     return `<tr class="click" data-tl="${esc(r.reg)}" title="View full timeline">
       <td class="reg">${esc(r.reg)}</td><td class="num"><b>${r.count}</b>${r.noLoad.length?`<div class="addr">${r.noLoad.length} without loading</div>`:''}${r.inProgress&&r.inProgress.loadAt!=null?'<div class="addr">Loaded, returning</div>':''}${r.longN?`<div><span class="flag s30">${r.longN} over ${TRIP_H} hrs</span></div>`:''}${r.runLong?`<div><span class="flag s30">⚠ Trip running ${hm(r.runLong)}</span></div>`:''}</td><td class="num">${hm(r.avgTrip)}</td>
+      <td class="num"><b>${fmtKm(vehKm(r))}</b>${r.count&&vehKm(r)?`<div class="addr">${Math.round(vehKm(r)/r.count)} km/trip</div>`:''}${odoKm(r.reg)!=null?`<div class="addr">Odometer ${fmtKm(odoKm(r.reg))}</div>`:''}</td>
       <td class="num">${hm(t.run)}</td><td class="num">${hm(t.queue)}</td><td class="num">${hm(t.unload)}</td><td class="num">${hm(t.load)}</td>
       <td class="num${t.stop5n?' warn':''}">${t.stop5n?t.stop5n+' · '+hm(t.stop5):'—'}</td>
       <td class="num${t.stop30n?' bad':''}">${t.stop30n?'⚠ '+t.stop30n+' · '+hm(t.stop30):'—'}</td>
       <td class="num">${t.offline?hm(t.offline):'—'}</td>
       <td><div class="gantt">${ganttHtml(r.segs,w.from,w.to)}</div></td></tr>`;}).join('')
-    :`<tr><td colspan="11" class="empty">No timeline data for this period.</td></tr>`;
+    :`<tr><td colspan="12" class="empty">No timeline data for this period.</td></tr>`;
   $('tripNote').textContent=`From ${when(new Date(w.from*1000).toISOString())} to ${when(new Date(w.to*1000).toISOString())}. Click a vehicle to see its full timeline.`;
   if(tlReg&&!$('tlModal').hidden)openTimeline(tlReg,true);
 }
@@ -1396,29 +1415,29 @@ function openTimeline(reg,keep){
   $('tlSub').innerHTML=`From ${esc(when(new Date(w.from*1000).toISOString()))} to ${esc(when(new Date(w.to*1000).toISOString()))}`+(v?` · now: ${esc(SN[v.status]||v.status)}`:'')+
     ` · Supervisor: ${vi.supervisor_phone||vi.supervisor_name?phoneHtml(vi.supervisor_name,vi.supervisor_phone):'<span class="miss">not filled</span>'}`+
     (vi.driver_phone||vi.driver_name?` · Driver: ${phoneHtml(vi.driver_name,vi.driver_phone)}`:'');
-  $('tlSum').innerHTML=[['--c-unload','Trips',r.count],['--c-load','Avg trip time',hm(r.avgTrip)],['--c-move','Running',hm(t.run)],['--c-wait','Plant queue',hm(t.queue)],
+  $('tlSum').innerHTML=[['--c-unload','Trips',r.count],['--c-load','Avg trip time',hm(r.avgTrip)],['--c-move','Distance'+(odoKm(reg)!=null?' (odometer '+fmtKm(odoKm(reg))+')':''),fmtKm(vehKm(r))],['--c-move','Running',hm(t.run)],['--c-wait','Plant queue',hm(t.queue)],
     ['--c-unload','Unloading',hm(t.unload)],['--c-load','Loading',hm(t.load)],['--c-s5','Stop '+M5()+'+',t.stop5n?t.stop5n+' · '+hm(t.stop5):'0'],['--c-halt','Stop '+M30()+'+ (action)',t.stop30n?t.stop30n+' · '+hm(t.stop30):'0'],...(t.bd?[['--c-bd','Breakdown',hm(t.bd)]]:[])]
     .map(([c,l,n])=>`<div class="lg" style="--c:var(${c})"><span class="t">${l}</span><span class="n" style="font-size:22px">${n}</span></div>`).join('');
   $('tlBar').innerHTML=ganttHtml(r.segs,w.from,w.to,true);$('tlAxis').innerHTML=axisHtml(w.from,w.to);$('tlLegend').innerHTML=legendHtml();
   const ts=x=>x==null?'—':when(new Date(x*1000).toISOString());
   $('tlTrips').innerHTML=(r.trips.length?r.trips.map((x,i)=>`<tr><td class="num">${i+1}</td><td class="when">${x.startKnown?ts(x.start):'<span class="miss">before data</span>'}</td>
     <td class="when">${ts(x.loadAt)}<div class="addr">${esc(x.loadPlace||'')}</div></td><td class="when">${ts(x.ret)}</td>
-    <td class="num${x.dur!=null&&x.dur>TRIP_H*3600?' bad':''}"><b>${x.dur!=null?hm(x.dur):'≥ '+hm(x.ret-Math.max(w.from,r.segs[0]?r.segs[0].s:w.from))}</b>${x.dur!=null&&x.dur>TRIP_H*3600?`<div><span class="flag s30">Over ${TRIP_H} hrs</span></div>`:''}</td><td class="num">${hm(x.run)}</td><td class="num">${hm(x.load)}</td><td class="num">${hm(x.queue)}</td>
+    <td class="num${x.dur!=null&&x.dur>TRIP_H*3600?' bad':''}"><b>${x.dur!=null?hm(x.dur):'≥ '+hm(x.ret-Math.max(w.from,r.segs[0]?r.segs[0].s:w.from))}</b>${x.dur!=null&&x.dur>TRIP_H*3600?`<div><span class="flag s30">Over ${TRIP_H} hrs</span></div>`:''}</td><td class="num">${x.kmKnown?fmtKm(x.km):'—'}</td><td class="num">${hm(x.run)}</td><td class="num">${hm(x.load)}</td><td class="num">${hm(x.queue)}</td>
     <td class="num${x.stop5n?' warn':''}">${x.stop5n?x.stop5n+' · '+hm(x.stop5):'—'}</td><td class="num${x.stop30n?' bad':''}">${x.stop30n?'⚠ '+x.stop30n+' · '+hm(x.stop30):'—'}</td><td class="num">${x.offline?hm(x.offline):'—'}</td>
-    <td class="num">${hm(x.unload)}${x.exitAfter?'':' <span class="miss">(still inside)</span>'}</td></tr>`).join(''):'<tr><td colspan="12" class="empty">No completed trips (GTK → loading → GTK) in this period.</td></tr>')
-    +(r.runLong?`<tr class="s30"><td colspan="12">⚠ Current trip running ${hm(r.runLong)} (over ${TRIP_H} hrs) since leaving GTK at ${ts(r.inProgress.start)}</td></tr>`:'')
-    +(r.inProgress&&r.inProgress.loadAt!=null?`<tr class="tripsep"><td colspan="12">Trip in progress: ${r.inProgress.start?'left GTK at '+ts(r.inProgress.start)+', ':''}reached ${esc(r.inProgress.loadPlace||'loading')} at ${ts(r.inProgress.loadAt)}, now returning to GTK</td></tr>`:'')
-    +r.noLoad.map(x=>`<tr class="s5"><td colspan="12">Back at GTK without loading: left ${ts(x.start)}, returned ${ts(x.ret)} (not counted)</td></tr>`).join('');
+    <td class="num">${hm(x.unload)}${x.exitAfter?'':' <span class="miss">(still inside)</span>'}</td></tr>`).join(''):'<tr><td colspan="13" class="empty">No completed trips (GTK → loading → GTK) in this period.</td></tr>')
+    +(r.runLong?`<tr class="s30"><td colspan="13">⚠ Current trip running ${hm(r.runLong)} (over ${TRIP_H} hrs) since leaving GTK at ${ts(r.inProgress.start)}</td></tr>`:'')
+    +(r.inProgress&&r.inProgress.loadAt!=null?`<tr class="tripsep"><td colspan="13">Trip in progress: ${r.inProgress.start?'left GTK at '+ts(r.inProgress.start)+', ':''}reached ${esc(r.inProgress.loadPlace||'loading')} at ${ts(r.inProgress.loadAt)}, now returning to GTK</td></tr>`:'')
+    +r.noLoad.map(x=>`<tr class="s5"><td colspan="13">Back at GTK without loading: left ${ts(x.start)}, returned ${ts(x.ret)} (not counted)</td></tr>`).join('');
   const rets=new Map(r.trips.map((x,i)=>[x.ret,i])),nl=new Set(r.noLoad.map(x=>x.ret));
   const rows=[];
   r.segs.filter(g=>g.e>=w.from&&g.s<=w.to).forEach(g=>{
-    if(g.st==='unload'&&rets.has(g.s)){const i=rets.get(g.s),x=r.trips[i];rows.push(`<tr class="tripsep"><td colspan="6">Trip ${i+1} complete · back at GTK ${ts(g.s)}${x.dur!=null?' · trip time '+hm(x.dur):''} · loading: ${esc(x.loadPlace||'')}</td></tr>`);}
-    if(g.st==='unload'&&nl.has(g.s))rows.push(`<tr class="s5"><td colspan="6">Back at GTK without loading · ${ts(g.s)} (not counted)</td></tr>`);
+    if(g.st==='unload'&&rets.has(g.s)){const i=rets.get(g.s),x=r.trips[i];rows.push(`<tr class="tripsep"><td colspan="7">Trip ${i+1} complete · back at GTK ${ts(g.s)}${x.dur!=null?' · trip time '+hm(x.dur):''} · loading: ${esc(x.loadPlace||'')}</td></tr>`);}
+    if(g.st==='unload'&&nl.has(g.s))rows.push(`<tr class="s5"><td colspan="7">Back at GTK without loading · ${ts(g.s)} (not counted)</td></tr>`);
     const k=segKey(g),fl=k==='s30'?'<span class="flag s30">Action required</span>':k==='s5'?'<span class="flag s5">'+M5()+'+ min stop</span>':'';
-    rows.push(`<tr class="${k==='s30'?'s30':k==='s5'?'s5':''}"><td class="when">${ts(g.s)}</td><td class="when">${ts(g.e)}</td><td class="num">${hm(g.e-g.s)}</td>
+    rows.push(`<tr class="${k==='s30'?'s30':k==='s5'?'s5':''}"><td class="when">${ts(g.s)}</td><td class="when">${ts(g.e)}</td><td class="num">${hm(g.e-g.s)}</td><td class="num">${g.km!=null&&g.km>=0.1?fmtKm(g.km):'—'}</td>
       <td><span class="pill"><i class="dot" style="background:var(${SEG_COL[k]})"></i>${esc(SEG_LBL[k])}</span></td><td>${esc(g.place||'')}</td><td>${fl}</td></tr>`);
   });
-  $('tlBody').innerHTML=rows.join('')||'<tr><td colspan="6" class="empty">No data.</td></tr>';
+  $('tlBody').innerHTML=rows.join('')||'<tr><td colspan="7" class="empty">No data.</td></tr>';
   if(!keep){$('tlModal').hidden=false;$('tlClose').focus();}
 }
 function closeTimeline(){$('tlModal').hidden=true;tlReg=null;}
@@ -1428,13 +1447,13 @@ function csvDownload(name,rows){
 }
 const mins=s=>s==null?'':Math.round(s/60);
 $('tripCsv').addEventListener('click',()=>{
-  csvDownload('trips-'+tripRange+'.csv',[['VEHICLE','TRIPS (GTK-LOADING-GTK)','RETURNED WITHOUT LOADING','AVG TRIP TIME (MIN)','RUNNING (MIN)','PLANT QUEUE (MIN)','UNLOADING (MIN)','LOADING (MIN)','STOPS '+M5()+'+ (COUNT)','STOPS '+M5()+'+ (MIN)','STOPS '+M30()+'+ (COUNT)','STOPS '+M30()+'+ (MIN)','OFFLINE (MIN)','TRIPS OVER '+TRIP_H+' HRS','SUPERVISOR','MOBILE','BREAKDOWN (MIN)','DRIVER','DRIVER MOBILE']]
-    .concat(tripRes.map(r=>{const t=r.total,vi=vinfo[r.reg]||{};return [r.reg,r.count,r.noLoad.length,mins(r.avgTrip),mins(t.run),mins(t.queue),mins(t.unload),mins(t.load),t.stop5n,mins(t.stop5),t.stop30n,mins(t.stop30),mins(t.offline),r.longN||0,vi.supervisor_name||'',vi.supervisor_phone||'',mins(t.bd),vi.driver_name||'',vi.driver_phone||''];})));
+  csvDownload('trips-'+tripRange+'.csv',[['VEHICLE','TRIPS (GTK-LOADING-GTK)','RETURNED WITHOUT LOADING','AVG TRIP TIME (MIN)','RUNNING (MIN)','PLANT QUEUE (MIN)','UNLOADING (MIN)','LOADING (MIN)','STOPS '+M5()+'+ (COUNT)','STOPS '+M5()+'+ (MIN)','STOPS '+M30()+'+ (COUNT)','STOPS '+M30()+'+ (MIN)','OFFLINE (MIN)','TRIPS OVER '+TRIP_H+' HRS','SUPERVISOR','MOBILE','BREAKDOWN (MIN)','DRIVER','DRIVER MOBILE','DISTANCE GPS (KM)','DISTANCE ODOMETER (KM)']]
+    .concat(tripRes.map(r=>{const t=r.total,vi=vinfo[r.reg]||{};return [r.reg,r.count,r.noLoad.length,mins(r.avgTrip),mins(t.run),mins(t.queue),mins(t.unload),mins(t.load),t.stop5n,mins(t.stop5),t.stop30n,mins(t.stop30),mins(t.offline),r.longN||0,vi.supervisor_name||'',vi.supervisor_phone||'',mins(t.bd),vi.driver_name||'',vi.driver_phone||'',vehKm(r)!=null?Math.round(vehKm(r)*10)/10:'',odoKm(r.reg)!=null?Math.round(odoKm(r.reg)*10)/10:''];})));
 });
 const istT=x=>x==null?'':new Date(x*1000).toLocaleString('en-IN',TZ);
 $('tripListCsv').addEventListener('click',()=>{
-  const rows=[['VEHICLE','TRIP NO','LEFT GTK (IST)','REACHED LOADING (IST)','LOADING POINT','BACK AT GTK (IST)','LEFT GTK AFTER UNLOADING (IST)','TRIP TIME (MIN)','RUNNING (MIN)','LOADING (MIN)','PLANT QUEUE (MIN)','UNLOADING (MIN)','STOPS '+M5()+'+ (COUNT)','STOPS '+M30()+'+ (COUNT)','STOPS '+M30()+'+ (MIN)','OFFLINE (MIN)','BREAKDOWN (MIN)']];
-  tripRes.slice().sort((a,b)=>a.reg.localeCompare(b.reg)).forEach(r=>r.trips.forEach((x,i)=>rows.push([r.reg,i+1,x.startKnown?istT(x.start):'BEFORE DATA',istT(x.loadAt),x.loadPlace||'',istT(x.ret),istT(x.exitAfter),mins(x.dur),mins(x.run),mins(x.load),mins(x.queue),mins(x.unload),x.stop5n,x.stop30n,mins(x.stop30),mins(x.offline),mins(x.bd)])));
+  const rows=[['VEHICLE','TRIP NO','LEFT GTK (IST)','REACHED LOADING (IST)','LOADING POINT','BACK AT GTK (IST)','LEFT GTK AFTER UNLOADING (IST)','TRIP TIME (MIN)','RUNNING (MIN)','LOADING (MIN)','PLANT QUEUE (MIN)','UNLOADING (MIN)','STOPS '+M5()+'+ (COUNT)','STOPS '+M30()+'+ (COUNT)','STOPS '+M30()+'+ (MIN)','OFFLINE (MIN)','BREAKDOWN (MIN)','DISTANCE GPS (KM)']];
+  tripRes.slice().sort((a,b)=>a.reg.localeCompare(b.reg)).forEach(r=>r.trips.forEach((x,i)=>rows.push([r.reg,i+1,x.startKnown?istT(x.start):'BEFORE DATA',istT(x.loadAt),x.loadPlace||'',istT(x.ret),istT(x.exitAfter),mins(x.dur),mins(x.run),mins(x.load),mins(x.queue),mins(x.unload),x.stop5n,x.stop30n,mins(x.stop30),mins(x.offline),mins(x.bd),x.kmKnown?Math.round(x.km*10)/10:''])));
   csvDownload('every-trip-'+tripRange+'.csv',rows);
 });
 $('tripCopy').addEventListener('click',e=>{
@@ -1446,20 +1465,21 @@ $('tripCopy').addEventListener('click',e=>{
     `TRIPS (GTK → LOADING → GTK): ${done}`,
     `AVG TRIP TIME: ${k.length?hm(k.reduce((a,t)=>a+t.dur,0)/k.length):'—'}`,
     `VEHICLES WITH 0 TRIPS: ${none} of ${tripRes.length}`,
+    `DISTANCE (GPS): ${fmtKm(fleetKm())}${done?' · '+Math.round(fleetKm()/done)+' KM PER TRIP':''}`,
     `ROUTE STOPS ${M30()}+ MIN: ${act.reduce((a,r)=>a+r.total.stop30n,0)} ON ${act.length} VEHICLE(S)`];
   const bdN=bds.filter(b=>!b.resolved_at).length;if(bdN)L.push(`OPEN BREAKDOWNS: ${bdN}`);
-  if(top.length)L.push('','TOP VEHICLES:',...top.map(r=>`${r.reg} – ${r.count} TRIP(S)${r.avgTrip?' · AVG '+hm(r.avgTrip):''}`));
+  if(top.length)L.push('','TOP VEHICLES:',...top.map(r=>`${r.reg} – ${r.count} TRIP(S)${r.avgTrip?' · AVG '+hm(r.avgTrip):''}${vehKm(r)?' · '+fmtKm(vehKm(r)):''}`));
   if(act.length)L.push('','ACTION REQUIRED (LONG ROUTE STOPS):',...act.slice(0,10).map(r=>`${r.reg} – ${r.total.stop30n} STOP(S) · ${hm(r.total.stop30)}`));
   copyText(L.join('\n').toUpperCase(),e.currentTarget);
 });
 $('tlCsv').addEventListener('click',()=>{
   const r=tripRes.find(x=>x.reg===tlReg);if(!r)return;
-  csvDownload(r.reg+'-timeline.csv',[['START (IST)','END (IST)','MINUTES','ACTIVITY','LOCATION','FLAG']].concat(r.segs.map(g=>{const k=segKey(g);
-    return [new Date(g.s*1000).toLocaleString('en-IN',TZ),new Date(g.e*1000).toLocaleString('en-IN',TZ),mins(g.e-g.s),SEG_LBL[k],g.place||'',k==='s30'?'Action required':k==='s5'?M5()+'+ min stop':''];})));
+  csvDownload(r.reg+'-timeline.csv',[['START (IST)','END (IST)','MINUTES','DISTANCE (KM)','ACTIVITY','LOCATION','FLAG']].concat(r.segs.map(g=>{const k=segKey(g);
+    return [new Date(g.s*1000).toLocaleString('en-IN',TZ),new Date(g.e*1000).toLocaleString('en-IN',TZ),mins(g.e-g.s),g.km!=null?Math.round(g.km*10)/10:'',SEG_LBL[k],g.place||'',k==='s30'?'Action required':k==='s5'?M5()+'+ min stop':''];})));
 });
 $('tripSeg').addEventListener('click',async e=>{const b=e.target.closest('button[data-r]');if(!b)return;tripRange=b.dataset.r;
   [...$('tripSeg').children].forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
-  $('tripBody').innerHTML='<tr><td colspan="11" class="empty">Loading…</td></tr>';await loadSegs();renderTrips();renderHotspots();});
+  $('tripBody').innerHTML='<tr><td colspan="12" class="empty">Loading…</td></tr>';await loadSegs();renderTrips();renderHotspots();});
 $('tripSearch').addEventListener('input',renderTrips);
 $('tripBody').addEventListener('click',e=>{const r=e.target.closest('[data-tl]');if(r)openTimeline(r.dataset.tl);});
 $('tlClose').addEventListener('click',closeTimeline);
@@ -1867,6 +1887,8 @@ function renderHealth(){
   (h.links||[]).forEach(l=>{const d=l.days_left;card(!l.active?null:l.last_error?false:d!=null&&d<=3?false:true,'Tata link · '+esc(l.name),l.active?(l.expiry?'Valid until '+esc(l.expiry):'Expiry unknown'):'Paused',
     l.last_error?esc(l.last_error):d!=null?(d<=0?'Expired / expires today':d+' day(s) left'):'');if(l.active&&d!=null&&d<=3)warn.push(`Tata link "${l.name}" expires in ${Math.max(d,0)} day(s)`);});
   card(h.telegram_set&&h.telegram_on?true:null,'Telegram alerts',h.telegram_set?(h.telegram_on?'On':'Set up, but off'):'Not set up',`${h.alerts_24h} alerts in 24 hrs${h.alerts_unsent_24h?` · ${h.alerts_unsent_24h} not sent`:''}`);
+  if(h.km_24h!==undefined)card(h.km_24h>0?true:null,'Distance (24 hrs, GPS)',h.km_24h!=null?fmtKm(+h.km_24h):'Starting now',
+    h.odo_key?`Tata odometer found (${esc(h.odo_key)}) on ${h.odo_vehicles} vehicle(s), shown next to GPS km`:'Tata does not send an odometer, so km comes from GPS points');
   card(h.admin_pin_set,'Admin PIN',h.admin_pin_set?'Set':'Not set',h.admin_pin_set?'':'Anyone could create it. Set it now in Settings.');
   if(!h.admin_pin_set)warn.push('Admin PIN not set: create it in Settings');
   $('healthGrid').innerHTML=cards.join('');
