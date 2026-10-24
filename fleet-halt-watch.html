@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Fleet Halt Watch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: one working column — status strip, alert table first, then groups, history, offline, points, settings */
+:root{
+  --bg:#f3f4f7; --panel:#ffffff; --ink:#18202e; --muted:#5d6676; --line:#dde1e8; --soft:#eceff4;
+  --accent:#d98a00; --accent-ink:#ffffff;
+  --moving:#1f8a4c; --idling:#c47d00; --stopped:#6b3fb5; --offline:#7a8290; --alert:#c2362b; --ok:#1f8a4c;
+  --alert-bg:#fbeceb; --tag-load:#e5f1ff; --tag-load-ink:#1d4f91; --tag-unload:#e8f6ec; --tag-unload-ink:#1d6b3c;
+  --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#11151c; --panel:#191f29; --ink:#e7ebf2; --muted:#9aa3b2; --line:#2a3240; --soft:#202733;
+  --accent:#f0a526; --accent-ink:#1a1204;
+  --moving:#4cc27e; --idling:#f0a526; --stopped:#a786e6; --offline:#8b93a1; --alert:#f06b5f; --ok:#4cc27e;
+  --alert-bg:#3a1d1b; --tag-load:#1b2c44; --tag-load-ink:#9cc4ff; --tag-unload:#18321f; --tag-unload-ink:#8fd7a6;
+  color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:14px;line-height:1.45}
+.wrap{max-width:1100px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px;display:flex;flex-direction:column;gap:18px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{font-family:var(--display);font-weight:700;font-size:32px;letter-spacing:.01em;margin:0;line-height:1}
+h1 span{color:var(--accent)}
+h2{font-family:var(--display);font-weight:600;font-size:22px;margin:0;text-wrap:balance}
+.sub{color:var(--muted);font-size:13px;margin-top:4px}
+.btn{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:6px;padding:7px 12px;cursor:pointer}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.small{padding:4px 9px;font-size:12px}
+.btn.danger{color:var(--alert)}
+.btn.on{border-color:var(--accent);color:var(--accent)}
+.btn:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn[disabled]{opacity:.5;cursor:default}
+.strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.cell{background:var(--panel);padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.cell .n{font-family:var(--display);font-weight:700;font-size:34px;line-height:1;font-variant-numeric:tabular-nums}
+.cell .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.cell.key{background:var(--alert-bg)}
+.cell.key .n{color:var(--alert)}
+@media (max-width:760px){.strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:420px){.strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+section.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.panel-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.note{color:var(--muted);font-size:13px;max-width:72ch}
+.banner{border-radius:8px;padding:10px 14px;font-size:13px;border:1px solid var(--accent);background:var(--soft)}
+.health{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.tbl-wrap{overflow-x:auto;margin:0 -4px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px;border-bottom:1px solid var(--soft);vertical-align:top}
+tr:last-child td{border-bottom:none}
+.reg{font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+.dur{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
+.dur.hot{color:var(--alert)}
+.when{font-variant-numeric:tabular-nums;white-space:nowrap}
+.addr{color:var(--muted);font-size:12px}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--soft);white-space:nowrap}
+.tag{font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;white-space:nowrap}
+.tag.loading{background:var(--tag-load);color:var(--tag-load-ink)}
+.tag.unloading{background:var(--tag-unload);color:var(--tag-unload-ink)}
+.tag.hot{background:var(--alert-bg);color:var(--alert)}
+a.map{font-size:12px;color:var(--accent);font-weight:600;text-decoration:none;white-space:nowrap}
+a.map:hover{text-decoration:underline}
+.empty{color:var(--muted);padding:14px 4px;font-size:13px}
+.groups{display:flex;flex-direction:column;gap:8px}
+.grp{border:1px solid var(--soft);border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.grp-top{display:flex;flex-wrap:wrap;align-items:center;gap:8px;justify-content:space-between}
+.grp-name{font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.grp-count{font-family:var(--display);font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-family:var(--mono);font-size:11.5px;background:var(--soft);border-radius:4px;padding:2px 6px;white-space:nowrap}
+.chip.hot{background:var(--alert-bg);color:var(--alert)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+.field{display:flex;flex-direction:column;gap:3px;min-width:0}
+.field label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+input,select{font:inherit;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;padding:6px 8px;min-width:0}
+input[type=number]{width:96px}
+details > summary{cursor:pointer;list-style:none}
+details > summary::-webkit-details-marker{display:none}
+details > summary h2::before{content:"▸ ";color:var(--muted);font-size:16px}
+details[open] > summary h2::before{content:"▾ "}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{font:inherit;font-size:12px;font-weight:600;background:var(--panel);color:var(--muted);border:0;border-right:1px solid var(--line);padding:5px 10px;cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.foot{color:var(--muted);font-size:12px}
+.setup{max-width:560px}
+@media (prefers-reduced-motion:no-preference){.spin{animation:sp 1s linear infinite;display:inline-block}@keyframes sp{to{transform:rotate(360deg)}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Fleet <span>Halt</span> Watch</h1>
+      <div class="sub" id="sub">Tata FleetEdge · Supabase se live</div>
+    </div>
+    <div class="row">
+      <span class="health" id="health"><i class="dot" style="background:var(--offline)"></i>Connect ho raha hai…</span>
+      <button class="btn primary" id="refreshBtn" type="button">Abhi refresh karein</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <!-- Pehli baar: Supabase connection -->
+  <section class="panel setup" id="setupPanel" hidden>
+    <h2>Supabase se jodein</h2>
+    <div class="note">Supabase Dashboard → Project Settings → API se <b>Project URL</b> aur <b>anon public</b> key yahan paste karein. Ye sirf is browser mein save hoga.</div>
+    <form class="row" id="setupForm">
+      <div class="field" style="flex:1 1 100%"><label for="sbUrl">Project URL</label><input id="sbUrl" required placeholder="https://xxxx.supabase.co"></div>
+      <div class="field" style="flex:1 1 100%"><label for="sbKey">anon public key</label><input id="sbKey" required placeholder="eyJhbGciOi…"></div>
+      <button class="btn primary" type="submit">Jodein</button>
+    </form>
+    <div class="foot" id="setupMsg"></div>
+  </section>
+
+  <div id="main" hidden style="display:contents">
+  <div class="strip">
+    <div class="cell"><span class="l">Total</span><span class="n" id="cTotal">–</span></div>
+    <div class="cell"><span class="l"><i class="dot" style="background:var(--moving)"></i>Chal rahi</span><span class="n" id="cMoving">–</span></div>
+    <div class="cell"><span class="l"><i class="dot" style="background:var(--idling)"></i>Idling</span><span class="n" id="cIdling">–</span></div>
+    <div class="cell"><span class="l"><i class="dot" style="background:var(--stopped)"></i>Khadi</span><span class="n" id="cStopped">–</span></div>
+    <div class="cell"><span class="l"><i class="dot" style="background:var(--offline)"></i>Offline</span><span class="n" id="cOffline">–</span></div>
+    <div class="cell key"><span class="l" id="cKeyLabel">Point ke bahar 60+ min</span><span class="n" id="cKey">–</span></div>
+  </div>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2 id="alertTitle">Point ke bahar 60+ min se khadi</h2>
+      <div class="row">
+        <div class="field"><label for="thr">Kitne min se zyada</label><input id="thr" type="number" min="5" step="5" value="60"></div>
+      </div>
+    </div>
+    <div class="note">Khadi aur idling gaadiyan jo kisi loading/unloading point ke daayre mein nahi hain. "≥" ka matlab hai gaadi tracking shuru hone (ya data gap) se pehle se ruki thi, asli time isse zyada hai.</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Gaadi</th><th>Status</th><th>Kab ruki</th><th>Kitni der</th><th>Jagah</th><th></th></tr></thead>
+      <tbody id="alertBody"><tr><td colspan="6" class="empty">Data load ho raha hai…</td></tr></tbody>
+    </table></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Jagah ke hisaab se khadi gaadiyan</h2>
+      <span class="foot">Laal chip = point ke bahar, threshold se zyada</span>
+    </div>
+    <div class="note">Jagah ka naam Tata ke address mein diye sabse paas ke landmark se hai. Jo jagah loading ya unloading point hai, use "Point banayein" se mark kar dein. Ye purani history par bhi lagu ho jaata hai.</div>
+    <div class="groups" id="groups"><div class="empty">Data load ho raha hai…</div></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Ruke hue stops ki history</h2>
+      <div class="row">
+        <div class="seg" id="rangeSeg" role="group" aria-label="Samay">
+          <button type="button" data-r="today" aria-pressed="true">Aaj</button>
+          <button type="button" data-r="yday" aria-pressed="false">Kal</button>
+          <button type="button" data-r="7" aria-pressed="false">7 din</button>
+          <button type="button" data-r="30" aria-pressed="false">30 din</button>
+        </div>
+        <button class="btn small" type="button" id="csvBtn">CSV download</button>
+      </div>
+    </div>
+    <div class="note">Khatam ho chuke stops jo point ke bahar threshold se lambe the: kab ruki, kab chali, aur kitni der.</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Gaadi</th><th>Ruki</th><th>Chali</th><th>Kitni der</th><th>Jagah</th><th></th></tr></thead>
+      <tbody id="histBody"><tr><td colspan="6" class="empty">Load ho raha hai…</td></tr></tbody>
+    </table></div>
+  </section>
+
+  <section class="panel">
+    <details id="offDetails">
+      <summary><h2>Offline gaadiyan (<span id="offCount">0</span>)</h2></summary>
+      <div class="note" style="margin-top:8px">90 minute se koi data nahi aaya. Location aakhri baar mili jagah hai.</div>
+      <div class="tbl-wrap" style="margin-top:8px"><table>
+        <thead><tr><th>Gaadi</th><th>Aakhri data</th><th>Aakhri jagah</th><th></th></tr></thead>
+        <tbody id="offBody"></tbody>
+      </table></div>
+    </details>
+  </section>
+
+  <section class="panel">
+    <details id="ptsDetails" open>
+      <summary><h2>Loading / unloading points (<span id="ptCount">0</span>)</h2></summary>
+      <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px">
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Naam</th><th>Type</th><th>Daayra (m)</th><th>Abhi gaadiyan</th><th></th></tr></thead>
+          <tbody id="ptBody"></tbody>
+        </table></div>
+        <form class="row" id="ptForm">
+          <div class="field" style="flex:1 1 200px"><label for="pName">Naam</label><input id="pName" required placeholder="Jaise: GTK Siding"></div>
+          <div class="field"><label for="pType">Type</label><select id="pType"><option value="loading">Loading</option><option value="unloading">Unloading</option><option value="other">Sirf naam (alert chalu)</option></select></div>
+          <div class="field"><label for="pLat">Latitude</label><input id="pLat" required inputmode="decimal" style="width:120px"></div>
+          <div class="field"><label for="pLng">Longitude</label><input id="pLng" required inputmode="decimal" style="width:120px"></div>
+          <div class="field"><label for="pRad">Daayra (m)</label><input id="pRad" type="number" min="50" step="50" value="500"></div>
+          <button class="btn primary" type="submit" id="pSave">Point save karein</button>
+          <button class="btn" type="button" id="pCancel" hidden>Cancel</button>
+        </form>
+        <div class="foot" id="ptMsg"></div>
+      </div>
+    </details>
+  </section>
+
+  <section class="panel">
+    <details id="setDetails">
+      <summary><h2>Settings</h2></summary>
+      <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px">
+        <form class="row" id="linkForm">
+          <div class="field" style="flex:1 1 320px"><label for="linkIn">FleetEdge link ya reference ID</label><input id="linkIn" placeholder="https://fleetedgelivetracking.home.tatamotors/?id=ref…"></div>
+          <button class="btn primary" type="submit">Link save karein</button>
+        </form>
+        <div class="row">
+          <button class="btn small" type="button" id="resetConn">Supabase connection badlein</button>
+        </div>
+        <div class="foot" id="setMsg"></div>
+        <div class="note">Supabase har 2 minute Tata ke link se data leta hai, khud hi, chahe ye page khula ho ya nahi. Gaadi 300 meter se zyada hile ya chal pade to stop khatam maana jaata hai. Har 2 minute ki location 15 din tak rakhi jaati hai, stops ki history hamesha.</div>
+      </div>
+    </details>
+  </section>
+
+  <div class="foot" id="foot"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+// Chahein to yahan seedha bhar dein; khaali rehne par app pehli baar poochega.
+const DEFAULT_URL = 'https://cfsgnzzzniqhxxngltyw.supabase.co';
+const DEFAULT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNmc2duenp6bmlxaHh4bmdsdHl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI4MjU0MzEsImV4cCI6MjEwODQwMTQzMX0.9Ks-9XIyBIjhkB9z298vc5OMc-_iDdYVHWOSleEBQzg';
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ls={get(k,d){try{const v=localStorage.getItem('fhw_'+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem('fhw_'+k,JSON.stringify(v));}catch(e){}},del(k){try{localStorage.removeItem('fhw_'+k);}catch(e){}}};
+
+let SB={url:ls.get('url',DEFAULT_URL),key:ls.get('key',DEFAULT_KEY)};
+let cfg=null, live=[], open=[], points=[], hist=[], range='today', editId=null, loading=false;
+
+/* ---------- Supabase REST ---------- */
+async function api(path,opt={}){
+  const r=await fetch(SB.url.replace(/\/$/,'')+'/rest/v1/'+path,{...opt,headers:{apikey:SB.key,Authorization:'Bearer '+SB.key,'Content-Type':'application/json',...(opt.headers||{})}});
+  if(!r.ok){let m='HTTP '+r.status;try{const j=await r.json();m=j.message||j.hint||m;}catch(e){}throw new Error(m);}
+  if(r.status===204) return null;
+  const t=await r.text();return t?JSON.parse(t):null;
+}
+
+/* ---------- helpers ---------- */
+const TZ={timeZone:'Asia/Kolkata'};
+function fmtMin(m){m=Math.max(0,Math.round(m));if(m<60)return m+' min';const h=Math.floor(m/60),r=m%60;if(h<24)return h+' ghanta'+(r?' '+r+' min':'');const d=Math.floor(h/24),hh=h%24;return d+' din'+(hh?' '+hh+' ghanta':'');}
+function when(iso){if(!iso)return '—';const d=new Date(iso);const today=new Date().toLocaleDateString('en-IN',TZ);const day=d.toLocaleDateString('en-IN',TZ);const t=d.toLocaleTimeString('en-IN',{...TZ,hour:'2-digit',minute:'2-digit'});return day===today?t:d.toLocaleDateString('en-IN',{...TZ,day:'numeric',month:'short'})+', '+t;}
+function mapLink(lat,lng){return 'https://www.google.com/maps?q='+lat+','+lng;}
+function parseLink(s){s=(s||'').trim();const m=s.match(/[?&]id=([^&#\s]+)/);return m?m[1]:s;}
+function dist(a,b,c,d){const R=6371000,t=x=>x*Math.PI/180;const dl=t(c-a),dn=t(d-b);const h=Math.sin(dl/2)**2+Math.cos(t(a))*Math.cos(t(c))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h));}
+const SC={Moving:'var(--moving)',Idling:'var(--idling)',Stopped:'var(--stopped)',Offline:'var(--offline)'};
+const SN={Moving:'Chal rahi',Idling:'Idling',Stopped:'Khadi',Offline:'Offline'};
+function thr(){return cfg?.threshold_min||60;}
+const isLU=t=>t==='loading'||t==='unloading';
+const TYPE_TAG={loading:'Loading point',unloading:'Unloading point'};
+function placeCell(h){const named=h.point_name&&h.point_name!==h.landmark;return `<div>${esc(h.point_name||h.landmark)}</div>${named?`<div class="addr">${esc(h.landmark)}</div>`:''}<div class="addr">${esc(h.address||'')}</div>`;}
+function banner(html){const b=$('banner');if(!html){b.hidden=true;return;}b.innerHTML=html;b.hidden=false;}
+function rangeStart(){const now=new Date();const ist=new Date(now.toLocaleString('en-US',TZ));const off=now-ist;const mid=new Date(ist.getFullYear(),ist.getMonth(),ist.getDate());const midUtc=new Date(mid.getTime()+off);
+  if(range==='today')return {from:midUtc};if(range==='yday')return {from:new Date(midUtc-86400000),to:midUtc};return {from:new Date(now-(+range)*86400000)};}
+
+/* ---------- load ---------- */
+async function loadAll(){
+  if(loading)return;loading=true;
+  try{
+    const [c,l,o,p]=await Promise.all([
+      api('config?select=*&id=eq.1'),
+      api('vehicles_live?select=reg,status,lat,lng,address,landmark,event_ts,updated_at'),
+      api('v_open_halts?select=*'),
+      api('points?select=*&order=name')]);
+    cfg=c&&c[0];live=l||[];open=o||[];points=p||[];
+    await loadHist();
+    if(!renaming) render();
+  }catch(e){
+    setHealth('bad','Supabase se data nahi aaya: '+e.message);
+    if(/JWT|apikey|Invalid API key|401|Failed to fetch/i.test(e.message)) banner('Supabase connection mein dikkat hai ('+esc(e.message)+'). Settings mein URL aur anon key check karein.');
+    else if(/relation|does not exist|schema cache/i.test(e.message)) banner('Supabase mein tables nahi mili. Pehle <b>supabase-setup.sql</b> SQL Editor mein chalayein.');
+  }finally{loading=false;}
+}
+async function loadHist(){
+  const {from,to}=rangeStart();
+  let q='v_halt_history?select=*&or=(point_id.is.null,point_type.eq.other)&minutes=gte.'+thr()+'&end_at=gte.'+encodeURIComponent(from.toISOString());
+  if(to) q+='&start_at=lt.'+encodeURIComponent(to.toISOString());
+  q+='&order=start_at.desc&limit=1000';
+  hist=await api(q)||[];
+}
+
+/* ---------- render ---------- */
+function setHealth(kind,text){$('health').innerHTML='<i class="dot" style="background:'+(kind==='ok'?'var(--ok)':kind==='warn'?'var(--idling)':'var(--alert)')+'"></i>'+esc(text);}
+function render(){
+  const T=thr();
+  $('thr').value=T;
+  $('cKeyLabel').textContent='Point ke bahar '+T+'+ min';
+  $('alertTitle').textContent='Point ke bahar '+T+'+ min se khadi';
+  if(document.activeElement?.id!=='linkIn') $('linkIn').value=cfg?.link_id||'';
+
+  // health
+  if(cfg){
+    const age=cfg.last_ok_at?(Date.now()-new Date(cfg.last_ok_at))/60000:Infinity;
+    if(cfg.last_error){setHealth('bad','Aakhri poll fail: '+cfg.last_error);banner(/expire|galat/i.test(cfg.last_error)?'Tata ka link expire ho gaya hai ya galat hai. Settings mein naya FleetEdge link daalein.':'Supabase Tata se data nahi le paaya: '+esc(cfg.last_error)+'. Agla try 2 minute mein apne aap hoga.');}
+    else if(age>6){setHealth('warn','Aakhri data '+fmtMin(age)+' pehle');banner('Pichhle '+fmtMin(age)+' se naya data nahi aaya. Supabase mein fleet-poll job chal rahi hai ya nahi, check karein.');}
+    else {setHealth('ok','Data '+when(cfg.last_ok_at)+' ka');banner('');}
+    $('sub').textContent='Tata FleetEdge · Supabase se live'+(cfg.link_expiry?' · link '+cfg.link_expiry+' tak valid':'');
+  }
+
+  const c={Moving:0,Idling:0,Stopped:0,Offline:0};live.forEach(v=>c[v.status]=(c[v.status]||0)+1);
+  $('cTotal').textContent=live.length;$('cMoving').textContent=c.Moving;$('cIdling').textContent=c.Idling;$('cStopped').textContent=c.Stopped;$('cOffline').textContent=c.Offline;
+
+  const alerts=open.filter(h=>!isLU(h.point_type)&&h.minutes>=T).sort((a,b)=>b.minutes-a.minutes);
+  $('cKey').textContent=alerts.length;
+  const firstPoll=open.length?Math.min(...open.map(h=>new Date(h.start_at).getTime())):Date.now();
+  $('alertBody').innerHTML=alerts.length?alerts.map(h=>`<tr>
+    <td class="reg">${esc(h.reg)}</td>
+    <td><span class="pill"><i class="dot" style="background:${SC[h.status]}"></i>${SN[h.status]}</span></td>
+    <td class="when">${h.start_known?'':'≤ '}${when(h.start_at)}</td>
+    <td class="dur hot">${h.start_known?'':'≥ '}${fmtMin(h.minutes)}</td>
+    <td>${placeCell(h)}</td>
+    <td><a class="map" href="${mapLink(h.lat,h.lng)}" target="_blank" rel="noopener">Map ↗</a></td></tr>`).join('')
+    :`<tr><td colspan="6" class="empty">${(Date.now()-firstPoll)/60000<T?'Tracking '+when(new Date(firstPoll).toISOString())+' se chal rahi hai. '+T+' minute poore hone par yahan gaadiyan dikhengi.':'Abhi koi gaadi point ke bahar '+T+' minute se zyada nahi khadi.'}</td></tr>`;
+
+  // groups
+  const g=new Map();
+  for(const h of open){const key=h.point_id?'p:'+h.point_id:'l:'+h.landmark;if(!g.has(key))g.set(key,{pt:h.point_id?{id:h.point_id,name:h.point_name,type:h.point_type}:null,name:h.point_id?h.point_name:h.landmark,landmark:h.landmark,list:[]});g.get(key).list.push(h);}
+  const groups=[...g.values()].sort((a,b)=>b.list.length-a.list.length);
+  $('groups').innerHTML=groups.length?groups.map(gr=>{
+    const lu=gr.pt&&isLU(gr.pt.type);
+    const hot=lu?0:gr.list.filter(h=>h.minutes>=T).length;
+    const lat=gr.list.reduce((s,h)=>s+h.lat,0)/gr.list.length,lng=gr.list.reduce((s,h)=>s+h.lng,0)/gr.list.length;
+    const chips=gr.list.slice().sort((a,b)=>b.minutes-a.minutes).map(h=>`<span class="chip${(!lu&&h.minutes>=T)?' hot':''}" title="${SN[h.status]} · ${when(h.start_at)} se">${esc(h.reg)} · ${h.start_known?'':'≥'}${fmtMin(h.minutes)}</span>`).join('');
+    const ll=`data-lat="${lat.toFixed(6)}" data-lng="${lng.toFixed(6)}"`;
+    return `<div class="grp"><div class="grp-top">
+      <div class="grp-name"><span class="grp-count">${gr.list.length}</span><span class="nm">${esc(gr.name)}</span>${lu?`<span class="tag ${gr.pt.type}">${TYPE_TAG[gr.pt.type]}</span>`:''}${hot?`<span class="tag hot">${hot} gaadi ${T}+ min</span>`:''}</div>
+      <div class="row"><a class="map" href="${mapLink(lat.toFixed(6),lng.toFixed(6))}" target="_blank" rel="noopener">Map ↗</a>
+        <button class="btn small" type="button" data-rn="1" data-pid="${gr.pt?gr.pt.id:''}" data-name="${esc(gr.name)}" ${ll}>Naam badlein</button>
+        ${lu?'':`<button class="btn small" type="button" data-mk="${esc(gr.name)}" data-pid="${gr.pt?gr.pt.id:''}" ${ll}>Point banayein</button>`}</div>
+    </div>${(gr.pt&&gr.name!==gr.landmark)?`<div class="addr">Tata landmark: ${esc(gr.landmark)}</div>`:''}<div class="chips">${chips}</div></div>`;}).join(''):'<div class="empty">Abhi koi gaadi khadi nahi hai.</div>';
+
+  // history
+  $('histBody').innerHTML=hist.length?hist.map(h=>`<tr>
+    <td class="reg">${esc(h.reg)}</td>
+    <td class="when">${h.start_known?'':'≤ '}${when(h.start_at)}</td>
+    <td class="when">${h.end_estimated?'~ ':''}${when(h.end_at)}</td>
+    <td class="dur">${(h.start_known&&!h.end_estimated)?'':'≈ '}${fmtMin(h.minutes)}</td>
+    <td>${placeCell(h)}</td>
+    <td><a class="map" href="${mapLink(h.lat,h.lng)}" target="_blank" rel="noopener">Map ↗</a></td></tr>`).join('')
+    :`<tr><td colspan="6" class="empty">Is samay mein point ke bahar ${T}+ minute ka koi stop khatam nahi hua.</td></tr>`;
+
+  // offline
+  const off=live.filter(v=>v.status==='Offline').sort((a,b)=>new Date(b.event_ts)-new Date(a.event_ts));
+  $('offCount').textContent=off.length;
+  $('offBody').innerHTML=off.length?off.map(v=>`<tr><td class="reg">${esc(v.reg)}</td><td class="dur">${fmtMin((Date.now()-new Date(v.event_ts))/60000)} pehle</td><td><div>${esc(v.landmark)}</div><div class="addr">${esc(v.address||'')}</div></td><td><a class="map" href="${mapLink(v.lat,v.lng)}" target="_blank" rel="noopener">Map ↗</a></td></tr>`).join(''):'<tr><td colspan="4" class="empty">Koi gaadi offline nahi hai.</td></tr>';
+
+  // points
+  $('ptCount').textContent=points.length;
+  $('ptBody').innerHTML=points.length?points.map(p=>{
+    const n=live.filter(v=>v.status!=='Offline'&&v.lat!=null&&dist(v.lat,v.lng,p.lat,p.lng)<=p.radius_m).length;
+    return `<tr><td><div class="nm">${esc(p.name)}</div><div class="addr">${(+p.lat).toFixed(5)}, ${(+p.lng).toFixed(5)}</div></td><td><span class="tag ${p.type}">${{loading:'Loading',unloading:'Unloading',other:'Sirf naam'}[p.type]}</span></td><td class="dur">${p.radius_m}</td><td class="dur">${n}</td><td style="white-space:nowrap"><button class="btn small" type="button" data-rn="1" data-pid="${p.id}" data-name="${esc(p.name)}">Naam badlein</button> <button class="btn small" type="button" data-ed="${p.id}">Sab badlein</button> <button class="btn small danger" type="button" data-del="${p.id}">Hatayein</button></td></tr>`;}).join('')
+    :'<tr><td colspan="5" class="empty">Abhi koi point nahi. "Jagah ke hisaab se" list mein "Point banayein" dabayein, ya neeche form bharein.</td></tr>';
+
+  $('foot').textContent='Page har minute khud refresh hota hai.';
+}
+
+/* ---------- events ---------- */
+$('refreshBtn').addEventListener('click',async()=>{
+  const b=$('refreshBtn');b.disabled=true;b.innerHTML='<span class="spin">↻</span> Tata se le raha hai';
+  try{const r=await api('rpc/poll_fleet',{method:'POST',body:'{}'});if(typeof r==='string'&&r.startsWith('error'))banner(esc(r));}
+  catch(e){banner('Refresh nahi hua: '+esc(e.message));}
+  await loadAll();b.disabled=false;b.textContent='Abhi refresh karein';
+});
+let thrT;
+$('thr').addEventListener('input',()=>{clearTimeout(thrT);thrT=setTimeout(async()=>{const v=Math.max(5,parseInt($('thr').value)||60);if(v===thr())return;
+  try{await api('config?id=eq.1',{method:'PATCH',body:JSON.stringify({threshold_min:v})});cfg.threshold_min=v;await loadHist();render();}catch(e){banner('Threshold save nahi hua: '+esc(e.message));}},700);});
+$('rangeSeg').addEventListener('click',async e=>{const b=e.target.closest('button[data-r]');if(!b)return;range=b.dataset.r;
+  [...$('rangeSeg').children].forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
+  $('histBody').innerHTML='<tr><td colspan="6" class="empty">Load ho raha hai…</td></tr>';
+  try{await loadHist();render();}catch(err){$('histBody').innerHTML='<tr><td colspan="6" class="empty">History nahi aayi: '+esc(err.message)+'</td></tr>';}});
+$('csvBtn').addEventListener('click',()=>{
+  const rows=[['Gaadi','Ruki (IST)','Chali (IST)','Minute','Jagah','Address','Latitude','Longitude','Start pakka','End pakka']].concat(
+    hist.map(h=>[h.reg,new Date(h.start_at).toLocaleString('en-IN',TZ),new Date(h.end_at).toLocaleString('en-IN',TZ),h.minutes,h.landmark,h.address,h.lat,h.lng,h.start_known?'Haan':'Nahi',h.end_estimated?'Nahi':'Haan']));
+  const csv='﻿'+rows.map(r=>r.map(x=>'"'+String(x??'').replace(/"/g,'""')+'"').join(',')).join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='halts-'+range+'.csv';document.body.appendChild(a);a.click();a.remove();});
+// Naam badlein: wahi line par input (points list aur jagah wali list dono mein)
+let renaming=false;
+document.addEventListener('click',async e=>{
+  const b=e.target.closest('[data-rn]');if(!b)return;
+  const box=b.closest('.grp, tr');const nm=box&&box.querySelector('.nm');if(!nm||box.querySelector('.rn-form'))return;
+  renaming=true;
+  const f=document.createElement('form');f.className='row rn-form';
+  f.innerHTML=`<input class="rn-in" aria-label="Naya naam" value="${esc(b.dataset.name)}" style="min-width:180px"><button class="btn small primary" type="submit">Save</button><button class="btn small" type="button" data-x="1">Cancel</button>`;
+  nm.hidden=true;nm.after(f);const inp=f.querySelector('input');inp.focus();inp.select();
+  const done=()=>{renaming=false;render();};
+  f.querySelector('[data-x]').addEventListener('click',done);
+  f.addEventListener('submit',async ev=>{ev.preventDefault();const name=inp.value.trim();if(!name){inp.focus();return;}
+    if(name===b.dataset.name){done();return;}
+    f.querySelector('[type=submit]').disabled=true;
+    try{
+      if(b.dataset.pid) await api('points?id=eq.'+b.dataset.pid,{method:'PATCH',body:JSON.stringify({name})});
+      else await api('points',{method:'POST',body:JSON.stringify({name,type:'other',lat:+b.dataset.lat,lng:+b.dataset.lng,radius_m:300})});
+      renaming=false;await loadAll();
+    }catch(err){f.querySelector('[type=submit]').disabled=false;banner('Naam save nahi hua: '+esc(err.message));}
+  });
+});
+$('groups').addEventListener('click',e=>{const b=e.target.closest('[data-mk]');if(!b)return;
+  editId=b.dataset.pid||null;$('pName').value=b.dataset.mk;$('pLat').value=b.dataset.lat;$('pLng').value=b.dataset.lng;$('pRad').value=500;$('pType').value='loading';
+  $('pSave').textContent='Point save karein';$('pCancel').hidden=false;$('ptDetails').open=true;$('ptMsg').textContent='Type aur daayra check karke save karein.';
+  $('ptForm').scrollIntoView({behavior:'smooth',block:'center'});$('pType').focus();});
+$('ptBody').addEventListener('click',async e=>{
+  const ed=e.target.closest('[data-ed]'),del=e.target.closest('[data-del]');
+  if(ed){const p=points.find(x=>x.id===ed.dataset.ed);if(!p)return;editId=p.id;$('pName').value=p.name;$('pType').value=p.type;$('pLat').value=p.lat;$('pLng').value=p.lng;$('pRad').value=p.radius_m;$('pSave').textContent='Badlav save karein';$('pCancel').hidden=false;$('pName').focus();}
+  if(del){
+    if(del.dataset.sure!=='1'){del.dataset.sure='1';del.textContent='Pakka hatayein?';setTimeout(()=>{del.dataset.sure='';del.textContent='Hatayein';},4000);return;}
+    try{await api('points?id=eq.'+del.dataset.del,{method:'DELETE'});$('ptMsg').textContent='Point hata diya.';await loadAll();}catch(err){$('ptMsg').textContent='Point nahi hata: '+err.message;}
+  }});
+$('pCancel').addEventListener('click',()=>{editId=null;$('ptForm').reset();$('pRad').value=500;$('pSave').textContent='Point save karein';$('pCancel').hidden=true;$('ptMsg').textContent='';});
+$('ptForm').addEventListener('submit',async e=>{e.preventDefault();
+  const body={name:$('pName').value.trim(),type:$('pType').value,lat:parseFloat($('pLat').value),lng:parseFloat($('pLng').value),radius_m:Math.max(50,parseInt($('pRad').value)||500)};
+  if(!body.name||!isFinite(body.lat)||!isFinite(body.lng)){$('ptMsg').textContent='Naam, latitude aur longitude sahi bharein.';return;}
+  try{
+    if(editId) await api('points?id=eq.'+editId,{method:'PATCH',body:JSON.stringify(body)});
+    else await api('points',{method:'POST',body:JSON.stringify(body)});
+    $('ptMsg').textContent='"'+body.name+'" save ho gaya.';$('pCancel').click();$('ptMsg').textContent='"'+body.name+'" save ho gaya.';await loadAll();
+  }catch(err){$('ptMsg').textContent='Save nahi hua: '+err.message;}});
+$('linkForm').addEventListener('submit',async e=>{e.preventDefault();const id=parseLink($('linkIn').value);if(!id)return;
+  try{await api('config?id=eq.1',{method:'PATCH',body:JSON.stringify({link_id:id})});$('setMsg').textContent='Link save ho gaya. Naya data le raha hoon…';$('refreshBtn').click();}
+  catch(err){$('setMsg').textContent='Link save nahi hua: '+err.message;}});
+$('resetConn').addEventListener('click',()=>{ls.del('url');ls.del('key');SB={url:'',key:''};showSetup();});
+$('setupForm').addEventListener('submit',async e=>{e.preventDefault();
+  SB={url:$('sbUrl').value.trim(),key:$('sbKey').value.trim()};
+  $('setupMsg').textContent='Check kar raha hoon…';
+  try{await api('config?select=id&limit=1');ls.set('url',SB.url);ls.set('key',SB.key);showMain();}
+  catch(err){$('setupMsg').textContent='Connect nahi hua: '+err.message+'. URL/key check karein, aur pehle supabase-setup.sql chala lein.';}});
+
+function showSetup(){$('sbUrl').value=SB.url||DEFAULT_URL;$('sbKey').value=SB.key||'';$('setupPanel').hidden=false;$('main').hidden=true;$('main').style.display='none';setHealth('warn','Supabase se nahi juda');}
+let timer;
+function showMain(){$('setupPanel').hidden=true;$('main').hidden=false;$('main').style.display='contents';loadAll();clearInterval(timer);timer=setInterval(loadAll,60000);}
+if(SB.url&&SB.key) showMain(); else showSetup();
+})();
+</script>
+</body>
+</html>
